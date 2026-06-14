@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=WhatsApp
+Comment=WhatsApp Web in Brave
+Exec=brave --name=whatsapp-brave --class=whatsapp-brave --app=https://web.whatsapp.com/
+Icon=brave-browser
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+StartupWMClass=whatsapp-brave

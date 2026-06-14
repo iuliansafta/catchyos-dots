@@ -4,3 +4,7 @@
 workspace "chat" {
     open-on-output "LG Display 0x07C6 Unknown"
 }
+
+workspace "music" {
+    open-on-output "LG Display 0x07C6 Unknown"
+}

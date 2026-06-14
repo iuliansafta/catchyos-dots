@@ -2,16 +2,11 @@
 
 [templates]
 
-# User-defined templates
-# Add your custom templates below
-# Example:
-# [templates.myapp]
-# input_path = "~/.config/noctalia/templates/myapp.css"
-# output_path = "~/.config/myapp/theme.css"
-# post_hook = "myapp --reload-theme"
-
-# Remove this section and add your own templates
-#[templates.placeholder]
-#input_path = "/etc/xdg/quickshell/noctalia-shell/Assets/Templates/noctalia.json"
-#output_path = "/home/iulian/.cache/noctalia/placeholder.json"
-
+# Neovim base16 colorscheme — syncs with Noctalia theme.
+# Template input uses Noctalia color variables; output is the rendered Lua file
+# that base16-colorscheme loads. Post-hook sends SIGUSR1 to all Neovim instances
+# so they live-reload the new colors.
+[templates.neovim]
+input_path = "~/.config/noctalia/templates/neovim.lua"
+output_path = "~/.config/nvim/lua/matugen.lua"
+post_hook = "pkill -SIGUSR1 nvim || true"

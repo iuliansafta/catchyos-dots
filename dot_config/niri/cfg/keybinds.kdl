@@ -123,10 +123,10 @@ binds {
     Mod+W                               { toggle-column-tabbed-display; }
 
     // ─── Screenshots ───
-    Print                               hotkey-overlay-title="Screenshot: Select Area" { screenshot; }
-    CTRL+Shift+1                        { screenshot; }
-    CTRL+Shift+2                        { screenshot-screen; }
-    CTRL+Shift+3                        { screenshot-window; }
+    Print                               hotkey-overlay-title="Screenshot: Smart Area" { spawn "niri-capture-screenshot"; }
+    CTRL+Shift+1                        hotkey-overlay-title="Screenshot: Smart Area" { spawn "niri-capture-screenshot"; }
+    CTRL+Shift+2                        hotkey-overlay-title="Screenshot: Focused Screen" { spawn "niri-capture-screenshot" "fullscreen"; }
+    CTRL+Shift+3                        hotkey-overlay-title="Screenshot: Region" { spawn "niri-capture-screenshot" "region"; }
 
     // ─── Emergency Escape Key ───
     // Use this when a fullscreen app blocks your keybinds.

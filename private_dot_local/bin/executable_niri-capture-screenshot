@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Satty screenshot workflow adapted for niri.
+# Usage: niri-capture-screenshot [smart|region|fullscreen|windows] [slurp|copy|save] [--editor=satty]
+
+set -euo pipefail
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}}"
+mkdir -p "$OUTPUT_DIR"
+
+# Hitting the key again cancels an in-progress selection.
+pkill slurp >/dev/null 2>&1 && exit 0 || true
+
+SCREENSHOT_EDITOR="${OMARCHY_SCREENSHOT_EDITOR:-satty}"
+ARGS=()
+for arg in "$@"; do
+  if [[ $arg == --editor=* ]]; then
+    SCREENSHOT_EDITOR="${arg#--editor=}"
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
+
+MODE="${1:-smart}"
+PROCESSING="${2:-slurp}"
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    notify-send "Screenshot tool missing dependency" "$1 is not installed" -u critical -t 5000 || true
+    echo "missing dependency: $1" >&2
+    exit 127
+  fi
+}
+
+need grim
+need slurp
+need jq
+need wl-copy
+
+open_editor() {
+  local filepath="$1"
+  if [[ $SCREENSHOT_EDITOR == "satty" ]]; then
+    need satty
+    satty --filename "$filepath" \
+      --resize 875x600 \
+      --floating-hack \
+      --output-filename "$filepath" \
+      --actions-on-enter save-to-clipboard \
+      --save-after-copy \
+      --copy-command 'wl-copy --type image/png'
+  else
+    "$SCREENSHOT_EDITOR" "$filepath"
+  fi
+}
+
+focused_output() {
+  niri msg -j workspaces | jq -r '.[] | select(.is_focused == true) | .output' | head -n1
+}
+
+output_rectangles() {
+  niri msg -j outputs | jq -r '
+    to_entries[]
+    | select(.value.logical != null)
+    | .value.logical
+    | "\(.x),\(.y) \(.width)x\(.height)"
+  '
+}
+
+focused_output_rectangle() {
+  local output
+  output="$(focused_output)"
+  [[ -n $output && $output != null ]] || return 1
+  niri msg -j outputs | jq -r --arg output "$output" '
+    .[$output].logical
+    | select(. != null)
+    | "\(.x),\(.y) \(.width)x\(.height)"
+  '
+}
+
+expand_tiny_selection_to_rect() {
+  local selection="$1"
+  local rects="$2"
+
+  if [[ $selection =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]]; then
+    local click_x="${BASH_REMATCH[1]}"
+    local click_y="${BASH_REMATCH[2]}"
+    local width="${BASH_REMATCH[3]}"
+    local height="${BASH_REMATCH[4]}"
+
+    if (( width * height < 20 )); then
+      while IFS= read -r rect; do
+        if [[ $rect =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+) ]]; then
+          local rect_x="${BASH_REMATCH[1]}"
+          local rect_y="${BASH_REMATCH[2]}"
+          local rect_width="${BASH_REMATCH[3]}"
+          local rect_height="${BASH_REMATCH[4]}"
+
+          if (( click_x >= rect_x && click_x < rect_x + rect_width && click_y >= rect_y && click_y < rect_y + rect_height )); then
+            printf '%s,%s %sx%s\n' "$rect_x" "$rect_y" "$rect_width" "$rect_height"
+            return 0
+          fi
+        fi
+      done <<<"$rects"
+    fi
+  fi
+
+  printf '%s\n' "$selection"
+}
+
+case "$MODE" in
+  fullscreen|screen)
+    SELECTION="$(focused_output_rectangle || true)"
+    ;;
+  region)
+    SELECTION="$(slurp 2>/dev/null || true)"
+    ;;
+  windows|window)
+    # niri does not expose global window rectangles to external tools yet.
+    # Keep the click/drag UX using output rectangles, then edit in satty.
+    notify-send "Screenshot" "niri window rectangles are unavailable; select the window/region manually" -t 2500 || true
+    RECTS="$(output_rectangles)"
+    RAW_SELECTION="$(printf '%s\n' "$RECTS" | slurp 2>/dev/null || true)"
+    SELECTION="$(expand_tiny_selection_to_rect "$RAW_SELECTION" "$RECTS")"
+    ;;
+  smart|*)
+    RECTS="$(output_rectangles)"
+    RAW_SELECTION="$(printf '%s\n' "$RECTS" | slurp 2>/dev/null || true)"
+    SELECTION="$(expand_tiny_selection_to_rect "$RAW_SELECTION" "$RECTS")"
+    ;;
+esac
+
+[[ -n ${SELECTION:-} ]] || exit 0
+
+FILENAME="screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
+FILEPATH="$OUTPUT_DIR/$FILENAME"
+
+case "$PROCESSING" in
+  slurp|edit)
+    grim -g "$SELECTION" "$FILEPATH"
+    wl-copy --type image/png <"$FILEPATH"
+    echo "$FILEPATH"
+    (
+      ACTION="$(notify-send "Screenshot saved to clipboard and file" "Open editor?" -t 10000 -i "$FILEPATH" -A "default=edit" || true)"
+      [[ $ACTION == "default" ]] && open_editor "$FILEPATH"
+    ) >/dev/null 2>&1 &
+    ;;
+  copy)
+    grim -g "$SELECTION" - | wl-copy --type image/png
+    ;;
+  save)
+    grim -g "$SELECTION" "$FILEPATH"
+    echo "$FILEPATH"
+    notify-send "Screenshot saved" "$FILEPATH" -t 3000 -i "$FILEPATH" || true
+    ;;
+  *)
+    echo "unknown processing mode: $PROCESSING" >&2
+    exit 2
+    ;;
+esac

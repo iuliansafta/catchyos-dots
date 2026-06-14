@@ -10,8 +10,34 @@
     }
 
     window-rule {
+        match app-id=r#"^(whatsapp-brave|WhatsApp|brave-browser)$"# title=r#".*WhatsApp.*"#
+        open-on-workspace "chat"
+    }
+
+    window-rule {
+        match app-id=r#"^(spotify|com\.spotify\.Client)$"#
+        open-on-workspace "music"
+        default-column-width { proportion 1.0; }
+    }
+
+    window-rule {
         match app-id=r#"^(1Password|1password)$"#
         open-floating true
+    }
+
+    window-rule {
+        match app-id="com.gabm.satty"
+        open-floating true
+        default-column-width { fixed 875; }
+        default-window-height { fixed 600; }
+    }
+
+    window-rule {
+        match app-id=r#"^(org\.gnome\.NautilusPreviewer|imv)$"#
+        open-floating true
+        // niri has no max-width rule; use a large proportional default size.
+        default-column-width { proportion 0.85; }
+        default-window-height { proportion 0.85; }
     }
 
     window-rule {

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Re-apply user desktop extras that need system packages.
+# Safe to re-run.
+
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  SUDO=()
+elif command -v sudo >/dev/null 2>&1; then
+  SUDO=(sudo)
+elif command -v pkexec >/dev/null 2>&1; then
+  SUDO=(pkexec)
+else
+  echo "Need sudo or pkexec to install packages" >&2
+  exit 1
+fi
+
+log() { printf '\n==> %s\n' "$*"; }
+
+log "Installing niri screenshot and preview workflow dependencies"
+"${SUDO[@]}" pacman -S --needed --noconfirm \
+  extra/grim \
+  extra/slurp \
+  extra/satty \
+  flatpak \
+  obs-studio \
+  xdg-desktop-portal \
+  xdg-desktop-portal-gnome \
+  xdg-desktop-portal-gtk \
+  imv \
+  jq \
+  libnotify \
+  sushi \
+  wl-clipboard
+
+log "Installing Flatpak desktop apps"
+if command -v flatpak >/dev/null 2>&1; then
+  flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+  flatpak install -y --user flathub \
+    com.github.PintaProject.Pinta \
+    md.obsidian.Obsidian \
+    com.spotify.Client
+
+  log "Making Flatpak apps visible to launchers"
+  mkdir -p "$HOME/.local/share/applications"
+  for desktop in \
+    com.github.PintaProject.Pinta.desktop \
+    md.obsidian.Obsidian.desktop \
+    com.spotify.Client.desktop; do
+    ln -sf "$HOME/.local/share/flatpak/exports/share/applications/$desktop" \
+      "$HOME/.local/share/applications/$desktop"
+  done
+  update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+
+  log "Setting Pinta as default image editor"
+  for mime in \
+    image/png \
+    image/jpeg \
+    image/jpg \
+    image/webp \
+    image/bmp \
+    image/tiff \
+    image/gif \
+    image/svg+xml \
+    image/openraster; do
+    xdg-mime default com.github.PintaProject.Pinta.desktop "$mime"
+  done
+else
+  echo "flatpak was not found after package installation" >&2
+  exit 1
+fi
+
+log "Done"
