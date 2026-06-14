@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Dell XPS / OWC Thunderbolt Dock + Apple Studio Display unplug-freeze workarounds.
+# Applies kernel parameters to /etc/default/limine and regenerates Limine entries.
+# Safe to run multiple times.
+
+CONFIG="/etc/default/limine"
+PARAMS=(
+  "pci=hpbussize=0x33,hpmemsize=256M"
+  "usbcore.quirks=0bda:8153:bjkm"
+  "module_blacklist=ucsi_acpi"
+)
+
+if [[ ! -f "$CONFIG" ]]; then
+  echo "Error: $CONFIG not found" >&2
+  exit 1
+fi
+
+backup="$CONFIG.bak.$(date +%F-%H%M%S)"
+echo "Creating backup: $backup"
+sudo cp "$CONFIG" "$backup"
+
+for param in "${PARAMS[@]}"; do
+  if grep -q -- "$param" "$CONFIG"; then
+    echo "Already present: $param"
+  else
+    echo "Adding: $param"
+    sudo sed -i "/^KERNEL_CMDLINE\[default\]+=\"/ s/\"$/ $param\"/" "$CONFIG"
+  fi
+done
+
+echo "Updating Limine entries..."
+sudo limine-update
+
+echo
+echo "Done. Reboot, then verify with:"
+echo "  cat /proc/cmdline"
+echo "  lsmod | grep ucsi || echo 'ucsi disabled'"
