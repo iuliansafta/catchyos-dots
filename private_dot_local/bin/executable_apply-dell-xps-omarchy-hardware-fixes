@@ -200,6 +200,75 @@ PY
   rm -f "$tmp"
 }
 
+patch_noctalia_apple_brightness() {
+  local file="/etc/xdg/quickshell/noctalia-shell/Services/Hardware/BrightnessService.qml"
+  [[ -f "$file" ]] || return 0
+
+  if grep -q 'asdbctl returns e.g. "brightness 100"' "$file" && grep -q 'onIsAppleDisplayChanged: initBrightness()' "$file"; then
+    return 0
+  fi
+
+  log "Patching Noctalia Apple display brightness parsing"
+  local tmp
+  tmp="$(mktemp)"
+  python - "$file" "$tmp" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+s = src.read_text()
+s = s.replace('''    readonly property bool isAppleDisplay: root.appleDisplayPresent && modelData.model.startsWith("StudioDisplay")
+    readonly property bool isInternalDisplay: modelData.name.startsWith("eDP") || modelData.name.startsWith("LVDS") || root.getMappedBacklightDevice(modelData.name) !== ""
+''','''    readonly property bool isAppleDisplay: root.appleDisplayPresent && String(modelData.model || "").replace(/ /g, "").startsWith("StudioDisplay")
+    readonly property bool isInternalDisplay: String(modelData.name || "").startsWith("eDP") || String(modelData.name || "").startsWith("LVDS") || root.getMappedBacklightDevice(modelData.name) !== ""
+''')
+s = s.replace('''          if (monitor.isAppleDisplay) {
+            // Apple display format: single integer (0-101)
+            var val = parseInt(dataText);
+            if (!isNaN(val)) {
+              newBrightness = val / 101;
+            }
+          } else if (monitor.isDdc) {
+''','''          if (monitor.isAppleDisplay) {
+            // asdbctl returns e.g. "brightness 100" (percent).
+            var match = dataText.match(/([0-9]+)/);
+            var val = match ? parseInt(match[1]) : NaN;
+            if (!isNaN(val)) {
+              newBrightness = Math.max(0, Math.min(1, val / 100));
+            }
+          } else if (monitor.isDdc) {
+''')
+s = s.replace('''          if (monitor.isAppleDisplay) {
+            var val = parseInt(dataText);
+            if (!isNaN(val)) {
+              monitor.brightness = val / 101;
+              Logger.d("Brightness", "Apple display brightness:", monitor.brightness);
+            }
+          } else if (monitor.isDdc) {
+''','''          if (monitor.isAppleDisplay) {
+            var match = dataText.match(/([0-9]+)/);
+            var val = match ? parseInt(match[1]) : NaN;
+            if (!isNaN(val)) {
+              monitor.brightness = Math.max(0, Math.min(1, val / 100));
+              Logger.d("Brightness", "Apple display brightness:", monitor.brightness);
+            }
+          } else if (monitor.isDdc) {
+''')
+s = s.replace('''    onBusNumChanged: initBrightness()
+    onIsDdcChanged: initBrightness()
+    Component.onCompleted: initBrightness()
+''','''    onBusNumChanged: initBrightness()
+    onIsDdcChanged: initBrightness()
+    onIsAppleDisplayChanged: initBrightness()
+    Component.onCompleted: initBrightness()
+''')
+dst.write_text(s)
+PY
+  root cp "$file" "$file.bak.$(date +%Y%m%d-%H%M%S)"
+  root cp "$tmp" "$file"
+  rm -f "$tmp"
+}
+
 configure_camera_services() {
   log "Starting IPU7 camera relay"
   root systemctl daemon-reload
@@ -247,6 +316,7 @@ main() {
   install_omarchy_ipu7_camera
   configure_ipu7_modules
   patch_noctalia_brightness
+  patch_noctalia_apple_brightness
   configure_browser_flags
   configure_camera_services
   verify

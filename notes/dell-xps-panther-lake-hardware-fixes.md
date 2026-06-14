@@ -11,8 +11,10 @@ This machine needs a few non-standard fixes for the current Linux desktop stack:
   - Omarchy `v4l2-relayd` package
   - `intel_cvs`, `intel_ipu7_psys`, `ov08x40`, `v4l2loopback`
   - camera exposed to browsers as `/dev/video50` / `Hardware ISP Camera`
-- Noctalia brightness patch:
+- Noctalia brightness patches:
   - external displays without DDC/asdbctl must not fall back to the laptop `intel_backlight`
+  - `asdbctl get` output like `brightness 100` is parsed correctly for Apple display sliders
+  - Apple display brightness is re-initialized after async detection
 - Browser camera flag:
   - `--enable-features=PipeWireCamera`
 - Omarchy Wi-Fi 7/EHT workaround for Intel BE200/BE211 on Dell XPS Panther Lake:
