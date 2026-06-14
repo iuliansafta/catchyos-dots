@@ -15,6 +15,12 @@ This machine needs a few non-standard fixes for the current Linux desktop stack:
   - external displays without DDC/asdbctl must not fall back to the laptop `intel_backlight`
 - Browser camera flag:
   - `--enable-features=PipeWireCamera`
+- Omarchy Wi-Fi 7/EHT workaround for Intel BE200/BE211 on Dell XPS Panther Lake:
+  - `/etc/modprobe.d/iwlwifi-disable-eht.conf`
+  - `options iwlwifi disable_11be=Y`
+  - falls back to Wi‑Fi 6/HE until Intel fixes the EHT RX path
+- Intel thermal management:
+  - `thermald` enabled/running
 
 Apply/re-apply with:
 
@@ -36,4 +42,8 @@ boltctl
 v4l2-ctl --list-devices
 v4l2-ctl -d /dev/video50 --stream-mmap --stream-count=5
 systemctl status v4l2-relayd@ipu7.service
+systemctl status thermald
+cat /etc/modprobe.d/iwlwifi-disable-eht.conf
 ```
+
+The Wi‑Fi 7/EHT workaround affects `iwlwifi` module load, so reboot or reload Wi‑Fi for it to take full effect.

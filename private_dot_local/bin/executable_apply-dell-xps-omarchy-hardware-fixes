@@ -6,6 +6,8 @@ set -euo pipefail
 # - IPU7/OV08X40 laptop camera via Omarchy's intel-ipu7-camera stack
 # - Noctalia brightness fallback fix so external sliders do not control laptop backlight
 # - Brave PipeWire camera flag
+# - Omarchy Wi-Fi 7/EHT workaround for Intel BE200/BE211 on Dell XPS Panther Lake
+# - thermald for Intel laptop thermal management
 #
 # Safe to re-run.
 
@@ -101,6 +103,24 @@ configure_thunderbolt_and_brightness() {
     boltctl | awk '/uuid:/ {print $3}' | while read -r uuid; do
       [[ -n "$uuid" ]] && boltctl enroll "$uuid" >/dev/null 2>&1 || true
     done
+  fi
+}
+
+configure_thermal_and_wifi() {
+  log "Configuring thermal management and Wi-Fi workaround"
+  install_pacman thermald
+  root systemctl enable --now thermald.service
+
+  # Temporary Omarchy workaround for Dell XPS 14/16 Panther Lake with Intel
+  # BE200/BE211 (8086:e440/e272b): disable Wi-Fi 7/EHT because the iwlwifi EHT
+  # RX path can negotiate unusably low rates. This falls back to Wi-Fi 6/HE.
+  if lspci -nn | grep -qE '\[8086:(e440|272b)\]'; then
+    cat <<'EOF' | root tee /etc/modprobe.d/iwlwifi-disable-eht.conf >/dev/null
+# Temporary fix for Dell XPS 14/16 on Panther Lake
+# Disable WiFi 7 (EHT/802.11be) on Intel BE200/BE211 — broken RX rate adaptation.
+# Falls back to WiFi 6 (HE/802.11ax). Remove when Intel fixes iwlwifi EHT RX path.
+options iwlwifi disable_11be=Y
+EOF
   fi
 }
 
@@ -223,6 +243,7 @@ verify() {
 main() {
   install_pacman curl linux-cachyos-headers dkms v4l2loopback-dkms gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad jsoncpp libdrm
   configure_thunderbolt_and_brightness
+  configure_thermal_and_wifi
   install_omarchy_ipu7_camera
   configure_ipu7_modules
   patch_noctalia_brightness
