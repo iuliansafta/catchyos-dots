@@ -1,0 +1,29 @@
+    layout {
+        gaps 8 // Gap between windows
+        center-focused-column "never" // Don't center multi-column workspaces
+        always-center-single-column // Center only while there is a single column/window on the workspace
+
+        background-color "transparent" // <- needed for noctalia-shell to set wallpaper
+
+        preset-column-widths {
+            proportion 0.33333
+            proportion 0.5
+            proportion 0.66667
+        }
+
+        focus-ring {
+            on
+            width 2 // Omarchy-like thin active-window outline
+            // BEGIN noctalia-theme-colors
+            active-color "#cba6f780" // from Noctalia mPrimary
+            inactive-color "#4c4f6955" // from Noctalia mOutline
+            urgent-color "#f38ba880" // from Noctalia mError
+            // END noctalia-theme-colors
+        }
+
+        border {
+            off // Use only the focus ring, not full borders on every window
+        }
+
+        struts {}
+    }

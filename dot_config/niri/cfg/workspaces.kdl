@@ -1,0 +1,6 @@
+// ────────────── Named Workspaces ──────────────
+// Named workspaces always exist and can be targeted by window rules.
+
+workspace "chat" {
+    open-on-output "LG Display 0x07C6 Unknown"
+}

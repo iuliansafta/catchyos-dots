@@ -1,0 +1,25 @@
+// ────────────── Output Configuration ──────────────
+// Positions below make displays extended, not mirrored.
+
+// Built-in laptop display on the left.
+// Its logical width is 2880 / 1.75 = 1645.714, so the external display
+// starts at x=1646 to avoid niri treating the outputs as overlapping.
+output "eDP-1" {
+    mode "2880x1800@120.001"
+    scale 1.75
+    position x=0 y=0
+    focus-at-startup
+}
+
+// Apple Studio Display on the right of the laptop.
+output "DP-1" {
+    mode "5120x2880@60.000"
+    scale 2
+    position x=1646 y=0
+}
+
+// The Studio Display also exposes this extra/phantom tiled output here.
+// Disable it so it does not sit to the far right and disrupt cursor movement.
+output "DP-2" {
+    off
+}

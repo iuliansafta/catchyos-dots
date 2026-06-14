@@ -1,0 +1,9 @@
+// ────────────── Switch Events ──────────────
+// Native niri handlers for laptop lid/tablet switches.
+// https://niri-wm.github.io/niri/Configuration:-Switch-Events.html
+
+switch-events {
+    // Closing the laptop lid locks the session and lets systemd-logind handle
+    // the normal lid action, usually suspend. This preserves running windows.
+    lid-close { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "lockScreen" "lock"; }
+}

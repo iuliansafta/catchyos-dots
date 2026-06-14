@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+log() {
+    if command -v systemd-cat >/dev/null 2>&1; then
+        printf '%s\n' "$*" | systemd-cat -t niri-lid-logout -p info || true
+    else
+        printf 'niri-lid-logout: %s\n' "$*" >&2
+    fi
+}
+
+shopt -s nullglob
+lid_state_files=(/proc/acpi/button/lid/*/state)
+
+if (( ${#lid_state_files[@]} == 0 )); then
+    log "No ACPI lid state file found; exiting."
+    exit 0
+fi
+
+read_lid_state() {
+    local file
+    for file in "${lid_state_files[@]}"; do
+        if [[ -r "$file" ]]; then
+            awk '{ print $2; exit }' "$file"
+            return 0
+        fi
+    done
+    printf 'unknown\n'
+}
+
+logout_session() {
+    log "Laptop lid closed; logging out niri session."
+
+    # Prefer niri's own quit action so the display manager returns cleanly.
+    if command -v niri >/dev/null 2>&1 && niri msg action quit >/dev/null 2>&1; then
+        exit 0
+    fi
+
+    # Fallbacks for unusual environments where niri IPC is unavailable.
+    if [[ -n "${XDG_SESSION_ID:-}" ]] && command -v loginctl >/dev/null 2>&1; then
+        loginctl terminate-session "$XDG_SESSION_ID"
+        exit 0
+    fi
+
+    if command -v loginctl >/dev/null 2>&1; then
+        loginctl terminate-user "${USER:?}"
+        exit 0
+    fi
+
+    log "Could not find niri IPC or loginctl fallback."
+    exit 1
+}
+
+last_state="$(read_lid_state)"
+log "Watching lid state (${lid_state_files[*]}), initial state: ${last_state}."
+
+while true; do
+    sleep 1
+    state="$(read_lid_state)"
+
+    # Trigger only on a transition to closed, so service startup with an already
+    # closed lid does not immediately kill the session.
+    if [[ "$state" == "closed" && "$last_state" != "closed" ]]; then
+        sleep 0.75
+        if [[ "$(read_lid_state)" == "closed" ]]; then
+            logout_session
+        fi
+    fi
+
+    last_state="$state"
+done

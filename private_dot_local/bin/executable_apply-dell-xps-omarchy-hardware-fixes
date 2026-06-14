@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Apply Dell XPS Panther Lake hardware fixes used on this machine:
+# - Apple Studio Display brightness through OWC Thunderbolt dock
+# - IPU7/OV08X40 laptop camera via Omarchy's intel-ipu7-camera stack
+# - Noctalia brightness fallback fix so external sliders do not control laptop backlight
+# - Brave PipeWire camera flag
+#
+# Safe to re-run.
+
+OMARCHY_REPO_URL="${OMARCHY_REPO_URL:-https://pkgs.omarchy.org/x86_64}"
+IPU7_CAMERA_PKG="${IPU7_CAMERA_PKG:-intel-ipu7-camera-1.0.3-4-x86_64.pkg.tar.zst}"
+V4L2_RELAYD_PKG="${V4L2_RELAYD_PKG:-v4l2-relayd-0.2.0-2.1-x86_64.pkg.tar.zst}"
+
+log() { printf '\n==> %s\n' "$*"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+pkg_present() { pacman -Q "$1" >/dev/null 2>&1; }
+
+root() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    "$@"
+  elif have sudo; then
+    sudo "$@"
+  elif have pkexec; then
+    pkexec "$@"
+  else
+    echo "Need sudo or pkexec for: $*" >&2
+    exit 1
+  fi
+}
+
+install_pacman() {
+  local missing=()
+  for pkg in "$@"; do
+    pkg_present "$pkg" || missing+=("$pkg")
+  done
+  if ((${#missing[@]})); then
+    log "Installing pacman packages: ${missing[*]}"
+    root pacman -S --needed --noconfirm "${missing[@]}"
+  fi
+}
+
+install_asdbctl() {
+  if have asdbctl; then
+    return
+  fi
+
+  log "Installing asdbctl for Apple Studio Display brightness"
+  if have yay; then
+    yay -S --needed --noconfirm asdbctl || true
+  elif have paru; then
+    paru -S --needed --noconfirm asdbctl || true
+  fi
+
+  if ! have asdbctl; then
+    echo "asdbctl is not installed. Install AUR package 'asdbctl' manually if needed." >&2
+  fi
+}
+
+download_pkg() {
+  local name="$1" dest="$2"
+  if [[ ! -s "$dest/$name" ]]; then
+    curl -fsSL -o "$dest/$name" "$OMARCHY_REPO_URL/$name"
+  fi
+}
+
+install_omarchy_ipu7_camera() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  log "Installing Omarchy IPU7 camera packages"
+  download_pkg "$V4L2_RELAYD_PKG" "$tmp"
+  download_pkg "$IPU7_CAMERA_PKG" "$tmp"
+
+  if ! pkg_present v4l2-relayd; then
+    root pacman -U --noconfirm "$tmp/$V4L2_RELAYD_PKG"
+  fi
+
+  # intel-ipu7-camera depends on 'linux-headers'. On CachyOS this machine has
+  # linux-cachyos-headers, which provides LINUX-HEADERS but not the literal name.
+  if ! pkg_present intel-ipu7-camera; then
+    root pacman -U --noconfirm --assume-installed linux-headers "$tmp/$IPU7_CAMERA_PKG"
+  fi
+}
+
+configure_thunderbolt_and_brightness() {
+  log "Configuring Thunderbolt/brightness support"
+  install_pacman ddcutil i2c-tools bolt
+  install_asdbctl
+
+  echo i2c-dev | root tee /etc/modules-load.d/i2c-dev.conf >/dev/null
+  root modprobe i2c-dev || true
+
+  # bolt is D-Bus activated/static on some systems; start if possible.
+  root systemctl start bolt.service 2>/dev/null || true
+
+  # Enroll currently connected OWC dock / Apple Studio Display if present.
+  if have boltctl; then
+    boltctl | awk '/uuid:/ {print $3}' | while read -r uuid; do
+      [[ -n "$uuid" ]] && boltctl enroll "$uuid" >/dev/null 2>&1 || true
+    done
+  fi
+}
+
+configure_ipu7_modules() {
+  log "Configuring IPU7 module ordering"
+  root mkdir -p /etc/modprobe.d
+  cat <<'EOF' | root tee /etc/modprobe.d/ipu7-usbio-order.conf >/dev/null
+softdep intel_ipu7 pre: usbio gpio_usbio i2c_usbio intel_cvs intel_skl_int3472_discrete
+EOF
+
+  # Omarchy camera stack needs PSYS; make sure older local blacklist is gone.
+  root modprobe intel_cvs || true
+  root modprobe intel_ipu7_psys || true
+  root mkinitcpio -P
+}
+
+patch_noctalia_brightness() {
+  local file="/etc/xdg/quickshell/noctalia-shell/Services/Hardware/BrightnessService.qml"
+  [[ -f "$file" ]] || return 0
+
+  if grep -q 'isInternalDisplay' "$file" && grep -q 'External displays without DDC/asdbctl' "$file"; then
+    return 0
+  fi
+
+  log "Patching Noctalia brightness fallback"
+  local tmp
+  tmp="$(mktemp)"
+  python - "$file" "$tmp" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+s = src.read_text()
+s = s.replace('''    readonly property bool isDdc: Settings.data.brightness.enableDdcSupport && root.ddcMonitors.some(m => m.connector === modelData.name)
+    readonly property string busNum: root.ddcMonitors.find(m => m.connector === modelData.name)?.busNum ?? ""
+    readonly property bool isAppleDisplay: root.appleDisplayPresent && modelData.model.startsWith("StudioDisplay")
+    readonly property string method: isAppleDisplay ? "apple" : (isDdc ? "ddcutil" : "internal")
+''','''    readonly property bool isDdc: Settings.data.brightness.enableDdcSupport && root.ddcMonitors.some(m => m.connector === modelData.name)
+    readonly property string busNum: root.ddcMonitors.find(m => m.connector === modelData.name)?.busNum ?? ""
+    readonly property bool isAppleDisplay: root.appleDisplayPresent && modelData.model.startsWith("StudioDisplay")
+    readonly property bool isInternalDisplay: modelData.name.startsWith("eDP") || modelData.name.startsWith("LVDS") || root.getMappedBacklightDevice(modelData.name) !== ""
+    readonly property string method: isAppleDisplay ? "apple" : (isDdc ? "ddcutil" : (isInternalDisplay ? "internal" : "none"))
+''')
+s = s.replace('''      if (isDdc)
+      return true;
+      // For internal displays, check if we have a brightness path
+      return brightnessPath !== "";
+''','''      if (isDdc)
+      return true;
+      // Only internal laptop panels, or explicitly mapped outputs, may use a
+      // /sys/class/backlight device. External displays without DDC/asdbctl must
+      // not fall back to the laptop backlight, otherwise both sliders control it.
+      if (!isInternalDisplay)
+      return false;
+      return brightnessPath !== "";
+''')
+s = s.replace('''    function setBrightness(value: real): void {
+      var min = Settings.data.brightness.enforceMinimum && isDdc ? 0.01 : 0;
+''','''    function setBrightness(value: real): void {
+      if (!isAppleDisplay && !isDdc && !isInternalDisplay)
+      return;
+
+      var min = Settings.data.brightness.enforceMinimum && isDdc ? 0.01 : 0;
+''')
+s = s.replace('''      } else if (!isDdc) {
+        // Internal backlight: first try explicit output mapping, then fall back to first available.
+        var preferredDevicePath = root.getMappedBacklightDevice(modelData.name);
+''','''      } else if (!isDdc && isInternalDisplay) {
+        // Internal backlight: first try explicit output mapping, then fall back to first available.
+        // Do not do this for external displays: they would incorrectly control the laptop backlight.
+        var preferredDevicePath = root.getMappedBacklightDevice(modelData.name);
+''')
+dst.write_text(s)
+PY
+  root cp "$file" "$file.bak.$(date +%Y%m%d-%H%M%S)"
+  root cp "$tmp" "$file"
+  rm -f "$tmp"
+}
+
+configure_camera_services() {
+  log "Starting IPU7 camera relay"
+  root systemctl daemon-reload
+  root systemctl enable intel-ipu7-camera.service
+  root systemctl restart camera-init.service v4l2-relayd@ipu7.service
+
+  # Let PipeWire re-probe /dev/video50 for the current user.
+  systemctl --user restart wireplumber.service 2>/dev/null || true
+}
+
+configure_browser_flags() {
+  log "Configuring browser PipeWire camera flag"
+  mkdir -p "$HOME/.config"
+  for flags in brave-flags.conf chromium-flags.conf chrome-flags.conf; do
+    local path="$HOME/.config/$flags"
+    if [[ ! -f "$path" ]]; then
+      printf '%s\n' '--enable-features=PipeWireCamera' > "$path"
+    elif ! grep -q 'PipeWireCamera' "$path"; then
+      if grep -q -- '--enable-features=' "$path"; then
+        sed -i 's/--enable-features=\([^ ]*\)/--enable-features=\1,PipeWireCamera/' "$path"
+      else
+        printf '%s\n' '--enable-features=PipeWireCamera' >> "$path"
+      fi
+    fi
+  done
+}
+
+verify() {
+  log "Verification"
+  v4l2-ctl --list-devices 2>/dev/null | sed -n '/Hardware ISP Camera/,+2p' || true
+  if [[ -e /dev/video50 ]]; then
+    timeout 5 v4l2-ctl -d /dev/video50 --stream-mmap --stream-count=5 >/dev/null && \
+      echo "Camera stream OK: /dev/video50 (Hardware ISP Camera)" || \
+      echo "Camera stream test failed; try rebooting once." >&2
+  fi
+  if have asdbctl; then
+    asdbctl get 2>/dev/null || echo "asdbctl cannot see Studio Display right now (is it connected/authorized?)" >&2
+  fi
+}
+
+main() {
+  install_pacman curl linux-cachyos-headers dkms v4l2loopback-dkms gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad jsoncpp libdrm
+  configure_thunderbolt_and_brightness
+  install_omarchy_ipu7_camera
+  configure_ipu7_modules
+  patch_noctalia_brightness
+  configure_browser_flags
+  configure_camera_services
+  verify
+
+  log "Done. Reboot once if browser camera lists do not refresh. Select 'Hardware ISP Camera'."
+}
+
+main "$@"
