@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 # CachyOS / Arch development bootstrap:
-# Rust, Go, Python, direnv, Ansible, Terraform, Docker, lazygit, lazydocker,
-# Claude Code, Pi, OpenCode, and useful build basics.
+# Rust, Go, Python, direnv, Ansible, Terraform, Kubernetes CLI, Docker,
+# AWS CLI/VPN, lazygit, lazydocker, Claude Code, Pi, OpenCode, and useful build basics.
 #
 # Usage:
 #   setup-coding-tools
@@ -58,6 +58,27 @@ install_packages() {
   fi
 }
 
+install_aur_packages() {
+  local packages=("$@")
+  if (( ${#packages[@]} == 0 )); then
+    return 0
+  fi
+
+  local aur_helper=""
+  if command -v paru >/dev/null 2>&1; then
+    aur_helper="paru"
+  elif command -v yay >/dev/null 2>&1; then
+    aur_helper="yay"
+  else
+    echo "No AUR helper found; skipping AUR packages: ${packages[*]}" >&2
+    echo "Install paru or yay, then re-run setup-coding-tools to install them." >&2
+    return 0
+  fi
+
+  log "Installing AUR packages"
+  "$aur_helper" -S --needed "${packages[@]}"
+}
+
 base_packages=(
   base-devel
   git
@@ -76,10 +97,19 @@ base_packages=(
   direnv
   ansible
   terraform
+  kubectl
+  kubectx
+  aws-cli-v2
   docker
   docker-compose
   lazygit
   lazydocker
+)
+
+aur_packages=(
+  1password-cli
+  awsvpnclient
+  spicetify-cli
 )
 
 ai_system_packages=(
@@ -94,6 +124,7 @@ if (( AI_ONLY )); then
   install_packages "${ai_system_packages[@]}"
 else
   install_packages "${base_packages[@]}"
+  install_aur_packages "${aur_packages[@]}"
 fi
 
 setup_npm_user_prefix() {
@@ -238,6 +269,12 @@ version_cmds=(
   direnv
   ansible
   terraform
+  kubectl
+  kubectx
+  kubens
+  aws
+  spicetify
+  op
   lazygit
   lazydocker
   docker
@@ -254,6 +291,7 @@ for cmd in "${version_cmds[@]}"; do
       node) "$cmd" --version ;;
       npm) "$cmd" --version | sed 's/^/npm /' ;;
       docker) "$cmd" --version ; docker compose version 2>/dev/null || true ;;
+      kubectx|kubens) "$cmd" --help 2>/dev/null | head -1 || echo "$cmd: installed" ;;
       *) "$cmd" --version 2>/dev/null | head -1 || echo "$cmd: installed" ;;
     esac
   else
@@ -279,6 +317,12 @@ Quick checks:
   direnv version
   ansible --version
   terraform version
+  kubectl version --client
+  kubectx --help
+  kubens --help
+  aws --version
+  spicetify -v
+  op --version
   claude --version
   pi --version
   opencode --version
