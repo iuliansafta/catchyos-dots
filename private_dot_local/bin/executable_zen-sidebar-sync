@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Sync Zen Browser sidebar (Compact Mode) to the number of connected displays.
+
+Rule:
+  * 1 display  -> Compact Mode ON  (sidebar auto-hidden, reveals on hover)
+  * 2+ displays -> Compact Mode OFF (sidebar always visible)
+
+It talks to a running Zen instance over the Marionette remote-control
+protocol (Zen must be launched with --marionette, see zen.desktop override)
+and sets gZenCompactModeManager.preference on every browser window. The
+setter is idempotent and also persists zen.view.compact.enable-at-startup,
+so the next launch already opens in the correct state.
+
+Usage:
+  zen-sidebar-sync            # one-shot: apply state once
+  zen-sidebar-sync --watch    # daemon: react to display hotplug + Zen launch
+  zen-sidebar-sync --state on|off|auto
+  zen-sidebar-sync -v         # verbose logging
+"""
+
+import argparse
+import json
+import os
+import select
+import socket
+import subprocess
+import sys
+import time
+
+MARIONETTE_HOST = "127.0.0.1"
+MARIONETTE_PORT = int(os.environ.get("ZEN_MARIONETTE_PORT", "2828"))
+DEBOUNCE_SECONDS = 1.2
+
+# Chrome-context script run inside Zen. arguments[0] is the desired compact
+# boolean. Applies to all browser windows; returns how many were updated.
+CHROME_SCRIPT = r"""
+const want = arguments[0];
+let n = 0;
+const e = Services.wm.getEnumerator("navigator:browser");
+while (e.hasMoreElements()) {
+  const w = e.getNext();
+  try {
+    if (w.gZenCompactModeManager) {
+      w.gZenCompactModeManager.preference = want;
+      n++;
+    }
+  } catch (ex) {}
+}
+return n;
+"""
+
+
+def log(verbose, *a):
+    if verbose:
+        print("[zen-sidebar-sync]", *a, file=sys.stderr, flush=True)
+
+
+# --------------------------------------------------------------------------
+# niri queries
+# --------------------------------------------------------------------------
+def niri_json(*args):
+    out = subprocess.run(
+        ["niri", "msg", "--json", *args],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return json.loads(out)
+
+
+def active_display_count():
+    """Number of outputs actually mapped into the layout (logical != null)."""
+    try:
+        outputs = niri_json("outputs")
+    except Exception:
+        return 1
+    return sum(1 for o in outputs.values() if o.get("logical"))
+
+
+def zen_window_count():
+    try:
+        wins = niri_json("windows")
+    except Exception:
+        return 0
+    return sum(1 for w in wins if (w.get("app_id") or "").lower() == "zen")
+
+
+# --------------------------------------------------------------------------
+# Minimal Marionette client (wire protocol: "<len>:<json-array>")
+# --------------------------------------------------------------------------
+class Marionette:
+    def __init__(self, host=MARIONETTE_HOST, port=MARIONETTE_PORT, timeout=10):
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.sock.settimeout(timeout)
+        self.buf = b""
+        self.msgid = 0
+        self._recv()  # server handshake packet
+
+    def _recv(self):
+        while b":" not in self.buf:
+            self._fill()
+        length, _, rest = self.buf.partition(b":")
+        n = int(length)
+        self.buf = rest
+        while len(self.buf) < n:
+            self._fill()
+        payload, self.buf = self.buf[:n], self.buf[n:]
+        return json.loads(payload.decode("utf-8"))
+
+    def _fill(self):
+        chunk = self.sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("Marionette connection closed")
+        self.buf += chunk
+
+    def command(self, name, params=None):
+        self.msgid += 1
+        mid = self.msgid
+        data = json.dumps([0, mid, name, params or {}]).encode("utf-8")
+        self.sock.sendall(str(len(data)).encode() + b":" + data)
+        while True:
+            pkt = self._recv()
+            if isinstance(pkt, list) and len(pkt) >= 4 and pkt[0] == 1 and pkt[1] == mid:
+                err, result = pkt[2], pkt[3]
+                if err:
+                    raise RuntimeError(f"{name}: {err}")
+                return result
+
+    def close(self):
+        try:
+            self.command("WebDriver:DeleteSession")
+        except Exception:
+            pass
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+
+def apply_state(compact, verbose=False):
+    """Connect to Zen and set compact mode. Returns windows updated, or -1 if Zen unreachable."""
+    try:
+        m = Marionette()
+    except (ConnectionRefusedError, socket.timeout, OSError) as e:
+        log(verbose, "Zen not reachable on Marionette:", e)
+        return -1
+    try:
+        m.command("WebDriver:NewSession", {})
+        m.command("Marionette:SetContext", {"value": "chrome"})
+        res = m.command("WebDriver:ExecuteScript", {"script": CHROME_SCRIPT, "args": [bool(compact)]})
+        # Marionette wraps script return values as {"value": ...}.
+        n = res.get("value") if isinstance(res, dict) else res
+        n = n if isinstance(n, int) else 0
+        log(verbose, f"set compact={compact} on {n} window(s)")
+        return n
+    finally:
+        m.close()
+
+
+def desired_compact(state):
+    if state == "on":
+        return True
+    if state == "off":
+        return False
+    return active_display_count() <= 1  # auto
+
+
+def run_once(state, verbose):
+    compact = desired_compact(state)
+    n = apply_state(compact, verbose)
+    if n < 0:
+        log(verbose, "skipped (Zen not running / Marionette unavailable)")
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------
+# Watch mode: react to display hotplug and Zen launch via niri event-stream
+# --------------------------------------------------------------------------
+def run_watch(state, verbose):
+    log(verbose, f"watch mode started (port {MARIONETTE_PORT})")
+
+    last_sig = None
+
+    def signature():
+        return (active_display_count(), zen_window_count())
+
+    def sync(reason):
+        nonlocal last_sig
+        sig = signature()
+        if sig == last_sig:
+            return
+        log(verbose, f"change ({reason}): displays={sig[0]} zen_windows={sig[1]}")
+        compact = desired_compact(state)
+        n = apply_state(compact, verbose)
+        # Only remember the signature once Zen actually accepted the change,
+        # so a launch that raced ahead of Marionette gets retried next event.
+        if n >= 0:
+            last_sig = sig
+
+    # Initial apply (best effort; Zen may not be up yet).
+    sync("startup")
+
+    proc = subprocess.Popen(
+        ["niri", "msg", "--json", "event-stream"],
+        stdout=subprocess.PIPE, text=True,
+    )
+    pending = False
+    deadline = 0.0
+    try:
+        fd = proc.stdout.fileno()
+        while True:
+            timeout = max(0.0, deadline - time.monotonic()) if pending else None
+            rlist, _, _ = select.select([fd], [], [], timeout)
+            if rlist:
+                line = proc.stdout.readline()
+                if not line:
+                    break  # niri/event-stream ended
+                # Coalesce bursts; any event arms a debounced re-check.
+                pending = True
+                deadline = time.monotonic() + DEBOUNCE_SECONDS
+            elif pending and time.monotonic() >= deadline:
+                pending = False
+                sync("event")
+    finally:
+        proc.terminate()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Sync Zen sidebar to display count")
+    ap.add_argument("--watch", action="store_true", help="run as a hotplug daemon")
+    ap.add_argument("--state", choices=["on", "off", "auto"], default="auto",
+                    help="force compact on/off, or auto by display count (default)")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args()
+
+    if args.watch:
+        run_watch(args.state, args.verbose)
+    else:
+        ok = run_once(args.state, args.verbose)
+        sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

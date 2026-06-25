@@ -8,3 +8,9 @@
     // Polkit authentication agent — graphical password prompts for pkexec / privileged actions.
     // Prefers the binary; falls back to the systemd user unit if the path changes.
     spawn-sh-at-startup "/usr/lib/hyprpolkitagent/hyprpolkitagent || systemctl --user start hyprpolkitagent.service"
+
+    // Zen sidebar auto-switch: Compact Mode (auto-hide) on a single display,
+    // always-on sidebar when a 2nd display is connected. Reacts to display
+    // hotplug and Zen launch via Marionette (Zen is started with --marionette
+    // from the user zen.desktop override). Script: ~/.local/bin/zen-sidebar-sync
+    spawn-sh-at-startup "exec ~/.local/bin/zen-sidebar-sync --watch"
