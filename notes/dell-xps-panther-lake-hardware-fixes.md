@@ -54,6 +54,9 @@ reinstalls or kernel updates. Verify `/dev/ipu7-psys0` exists and
   - `/etc/modprobe.d/iwlwifi-disable-eht.conf`
   - `options iwlwifi disable_11be=Y`
   - falls back to Wi‑Fi 6/HE until Intel fixes the EHT RX path
+- Panther Lake FRED:
+  - `fred=on` added to the Limine kernel command line
+  - takes effect after reboot; verify with `cat /proc/cmdline`
 - Intel thermal management:
   - `thermald` enabled/running
 
@@ -79,6 +82,7 @@ v4l2-ctl -d /dev/video50 --stream-mmap --stream-count=5
 systemctl status v4l2-relayd@ipu7.service
 systemctl status thermald
 cat /etc/modprobe.d/iwlwifi-disable-eht.conf
+cat /proc/cmdline | grep -o 'fred=on'
 ```
 
 The Wi‑Fi 7/EHT workaround affects `iwlwifi` module load, so reboot or reload Wi‑Fi for it to take full effect.

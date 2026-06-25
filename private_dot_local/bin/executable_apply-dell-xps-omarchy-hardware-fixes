@@ -7,6 +7,7 @@ set -euo pipefail
 # - Noctalia brightness fallback fix so external sliders do not control laptop backlight
 # - Brave PipeWire camera flag
 # - Omarchy Wi-Fi 7/EHT workaround for Intel BE200/BE211 on Dell XPS Panther Lake
+# - fred=on kernel arg for Panther Lake through Limine
 # - thermald for Intel laptop thermal management
 # - rtkit for PipeWire/WirePlumber realtime scheduling to reduce audio crackle/buzz
 # - SDDM Noctalia login theme wrapper/sync setup
@@ -186,6 +187,42 @@ configure_thermal_and_wifi() {
 options iwlwifi disable_11be=Y
 EOF
   fi
+}
+
+configure_panther_lake_fred() {
+  local cpu_model
+  cpu_model=$(awk -F: '/^model[[:space:]]*:/ { gsub(/[[:space:]]/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || true)
+  [[ "$cpu_model" == "204" ]] || return 0
+  [[ -f /etc/default/limine ]] || return 0
+
+  if grep -qw 'fred=on' /etc/default/limine; then
+    return 0
+  fi
+
+  log "Adding fred=on kernel arg for Panther Lake"
+  root cp -a /etc/default/limine "/etc/default/limine.bak.$(date +%Y%m%d-%H%M%S)"
+  root python3 - <<'PY'
+from pathlib import Path
+p = Path('/etc/default/limine')
+s = p.read_text()
+if 'fred=on' in s:
+    raise SystemExit
+lines = s.splitlines()
+for i, line in enumerate(lines):
+    if line.startswith('KERNEL_CMDLINE[default]+='):
+        lines[i] = line[:-1] + ' fred=on"' if line.endswith('"') else line + ' fred=on'
+        break
+else:
+    lines.append('KERNEL_CMDLINE[default]+="fred=on"')
+p.write_text('\n'.join(lines) + '\n')
+PY
+
+  if have limine-mkinitcpio; then
+    root limine-mkinitcpio
+  else
+    root mkinitcpio -P
+  fi
+  have limine-update && root limine-update || true
 }
 
 configure_ipu7_modules() {
@@ -426,6 +463,7 @@ main() {
   install_pacman curl linux-cachyos-headers dkms v4l2loopback-dkms gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad jsoncpp libdrm rtkit
   configure_thunderbolt_and_brightness
   configure_thermal_and_wifi
+  configure_panther_lake_fred
   disable_plymouth_splash
   install_omarchy_ipu7_camera
   patch_ipu7_psys_bus_register
