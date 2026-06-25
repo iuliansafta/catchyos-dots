@@ -14,7 +14,7 @@
         "enableSessionSearch": true,
         "enableSettingsSearch": true,
         "enableWindowsSearch": true,
-        "iconMode": "native",
+        "iconMode": "tabler",
         "ignoreMouseInput": false,
         "overviewLayer": false,
         "pinnedApps": [
@@ -216,15 +216,6 @@
                     "icon": "noctalia",
                     "id": "ControlCenter",
                     "useDistroLogo": false
-                },
-                {
-                    "defaultSettings": {
-                        "connectedColor": "primary",
-                        "disconnectedColor": "none",
-                        "displayMode": "alwaysShow",
-                        "pollInterval": 5000
-                    },
-                    "id": "plugin:protonvpn"
                 }
             ]
         }
@@ -233,7 +224,7 @@
         "backlightDeviceMappings": [
         ],
         "brightnessStep": 5,
-        "enableDdcSupport": true,
+        "enableDdcSupport": false,
         "enforceMinimum": true
     },
     "calendar": {
@@ -258,7 +249,7 @@
         "manualSunrise": "06:30",
         "manualSunset": "18:30",
         "monitorForColors": "",
-        "predefinedScheme": "Catppuccin",
+        "predefinedScheme": "Cyberpunk",
         "schedulingMode": "off",
         "syncGsettings": true,
         "useWallpaperColors": false
@@ -670,7 +661,7 @@
                 "id": "niri"
             },
             {
-                "enabled": true,
+                "enabled": false,
                 "id": "zed"
             },
             {
@@ -684,10 +675,6 @@
             {
                 "enabled": true,
                 "id": "foot"
-            },
-            {
-                "enabled": true,
-                "id": "kitty"
             },
             {
                 "enabled": true,
@@ -708,6 +695,10 @@
             {
                 "enabled": true,
                 "id": "spicetify"
+            },
+            {
+                "enabled": true,
+                "id": "kitty"
             }
         ],
         "enableUserTheming": true
@@ -727,7 +718,7 @@
         "translucentWidgets": false
     },
     "wallpaper": {
-        "automationEnabled": true,
+        "automationEnabled": false,
         "directory": "/home/iulian/Wallpapers",
         "enableMultiMonitorDirectories": false,
         "enabled": true,
@@ -762,7 +753,7 @@
         "useOriginalImages": false,
         "useSolidColor": false,
         "useWallhaven": false,
-        "viewMode": "single",
+        "viewMode": "recursive",
         "wallhavenApiKey": "",
         "wallhavenCategories": "111",
         "wallhavenOrder": "desc",

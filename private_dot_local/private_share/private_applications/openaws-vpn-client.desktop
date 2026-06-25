@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenAWS VPN Client
+GenericName=AWS Client VPN
+Comment=Connect to AWS Client VPN using SAML/browser login
+Exec=openaws-vpn-client
+Icon=network-vpn
+Terminal=false
+Categories=Network;Security;
+Keywords=aws;vpn;saml;openvpn;client;
+StartupWMClass=openaws-vpn-client

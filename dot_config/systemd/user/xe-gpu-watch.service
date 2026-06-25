@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch kernel log for Intel xe GPU hangs/resets (7.1-rc testing)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/xe-gpu-watch.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

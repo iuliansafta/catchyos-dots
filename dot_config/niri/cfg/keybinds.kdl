@@ -10,6 +10,7 @@ binds {
 
     // ─── Applications ───
     Mod+Return                          hotkey-overlay-title="Open Terminal: Ghostty" { spawn "ghostty"; }
+    Mod+Shift+Return                    hotkey-overlay-title="Open Terminal Below: Ghostty" { spawn "~/.config/niri/scripts/open-terminal-below.sh"; }
     Mod+Space                           hotkey-overlay-title="Open App Launcher: Noctalia" { spawn-sh "qs -c noctalia-shell ipc call launcher toggle"; }
     Mod+CTRL+Return                     hotkey-overlay-title="Open App Launcher: noctalia launcher" { spawn-sh "qs -c noctalia-shell ipc call launcher toggle"; }
     Mod+B                               hotkey-overlay-title="Open Browser: default" { spawn-sh "browser=$(xdg-settings get default-web-browser); [ -n \"$browser\" ] && gtk-launch \"$browser\""; }
@@ -59,6 +60,12 @@ binds {
     Mod+End                             { focus-column-last; }
     Mod+CTRL+Home                       { move-column-to-first; }
     Mod+CTRL+End                        { move-column-to-last; }
+
+    // Move windows into/out of vertical stacks within columns.
+    Mod+BracketLeft                     hotkey-overlay-title="Consume/expel window left" { consume-or-expel-window-left; }
+    Mod+BracketRight                    hotkey-overlay-title="Consume/expel window right" { consume-or-expel-window-right; }
+    Mod+Comma                           hotkey-overlay-title="Consume right window into column" { consume-window-into-column; }
+    Mod+Period                          hotkey-overlay-title="Expel bottom window from column" { expel-window-from-column; }
 
     Mod+Shift+Left                      { focus-monitor-left; }
     Mod+Shift+Right                     { focus-monitor-right; }

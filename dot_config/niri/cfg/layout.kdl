@@ -3,7 +3,7 @@
         center-focused-column "never" // Don't center multi-column workspaces
         always-center-single-column // Center only while there is a single column/window on the workspace
 
-        background-color "transparent" // <- needed for noctalia-shell to set wallpaper
+        background-color "transparent" // <- needed for noctalia-shell to set wallpaper (place-within-backdrop)
 
         preset-column-widths {
             proportion 0.33333

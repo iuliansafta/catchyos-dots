@@ -8,6 +8,8 @@ set -euo pipefail
 # - Brave PipeWire camera flag
 # - Omarchy Wi-Fi 7/EHT workaround for Intel BE200/BE211 on Dell XPS Panther Lake
 # - thermald for Intel laptop thermal management
+# - rtkit for PipeWire/WirePlumber realtime scheduling to reduce audio crackle/buzz
+# - SDDM Noctalia login theme wrapper/sync setup
 #
 # Safe to re-run.
 
@@ -22,12 +24,12 @@ pkg_present() { pacman -Q "$1" >/dev/null 2>&1; }
 root() {
   if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
     "$@"
-  elif have sudo; then
-    sudo "$@"
   elif have pkexec; then
     pkexec "$@"
+  elif have sudo; then
+    sudo "$@"
   else
-    echo "Need sudo or pkexec for: $*" >&2
+    echo "Need pkexec or sudo for: $*" >&2
     exit 1
   fi
 }
@@ -85,6 +87,68 @@ install_omarchy_ipu7_camera() {
   if ! pkg_present intel-ipu7-camera; then
     root pacman -U --noconfirm --assume-installed linux-headers "$tmp/$IPU7_CAMERA_PKG"
   fi
+}
+
+patch_ipu7_psys_bus_register() {
+  # Fix for CachyOS kernel >= 7.1: the kernel no longer ships an in-tree IPU7
+  # PSYS driver, and the intel-ipu7-camera DKMS source (ipu7-drivers 1.0.3)
+  # registers its psys char device on the custom "intel-ipu7-psys" bus_type
+  # WITHOUT ever calling bus_register(). On older kernels the in-tree driver
+  # registered that bus; without it, device_register() fails:
+  #   bus_add_device: cannot add device 'ipu7-psys0' to unregistered bus
+  #   intel_ipu7_psys.psys: probe ... failed with error -22
+  # -> no /dev/ipu7-psys0, icamerasrc hardware-ISP HAL can't init, camera dead.
+  # We patch the psys module to register/unregister its own bus, then rebuild
+  # DKMS. Idempotent and safe to re-run.
+  local f=/usr/src/ipu7-drivers-1.0.3/drivers/media/pci/intel/ipu7/psys/ipu-psys.c
+  [[ -f "$f" ]] || { log "IPU7 psys source not found; skipping bus_register patch"; return 0; }
+
+  if grep -q 'ipu7_psys_init' "$f"; then
+    log "IPU7 psys bus_register patch already applied"
+    return 0
+  fi
+
+  log "Patching IPU7 psys driver to register its own bus (kernel >= 7.1 fix)"
+  root cp -an "$f" "$f.orig"
+  root python3 - "$f" <<'PY'
+import sys
+f = sys.argv[1]
+s = open(f).read()
+old = "module_auxiliary_driver(ipu7_psys_driver);\n"
+new = (
+    "static int __init ipu7_psys_init(void)\n"
+    "{\n"
+    "\tint ret;\n\n"
+    "\t/*\n"
+    "\t * The psys char device is registered on the custom intel-ipu7-psys\n"
+    "\t * bus (psys->dev.bus in ipu7_psys_probe). On kernels that no longer\n"
+    "\t * ship the in-tree IPU7 driver, nothing else registers this bus, so\n"
+    "\t * register it here before the auxiliary driver can probe.\n"
+    "\t */\n"
+    "\tret = bus_register(&ipu7_psys_bus);\n"
+    "\tif (ret)\n"
+    "\t\treturn ret;\n\n"
+    "\tret = auxiliary_driver_register(&ipu7_psys_driver);\n"
+    "\tif (ret)\n"
+    "\t\tbus_unregister(&ipu7_psys_bus);\n\n"
+    "\treturn ret;\n"
+    "}\n"
+    "module_init(ipu7_psys_init);\n\n"
+    "static void __exit ipu7_psys_exit(void)\n"
+    "{\n"
+    "\tauxiliary_driver_unregister(&ipu7_psys_driver);\n"
+    "\tbus_unregister(&ipu7_psys_bus);\n"
+    "}\n"
+    "module_exit(ipu7_psys_exit);\n"
+)
+if s.count(old) != 1:
+    sys.exit("unexpected ipu-psys.c layout: %d matches for module_auxiliary_driver" % s.count(old))
+open(f, "w").write(s.replace(old, new))
+print("patched")
+PY
+
+  log "Rebuilding ipu7-drivers DKMS modules for all installed kernels"
+  root dkms autoinstall ipu7-drivers/1.0.3 || root dkms autoinstall || true
 }
 
 configure_thunderbolt_and_brightness() {
@@ -272,11 +336,22 @@ PY
 configure_camera_services() {
   log "Starting IPU7 camera relay"
   root systemctl daemon-reload
-  root systemctl enable intel-ipu7-camera.service
+  # The wrapper service is attached to graphical.target, but this niri setup may
+  # not keep graphical.target active on every boot. Enable the concrete init and
+  # relay units directly so the IPU7 virtual camera is available after reboot.
+  root systemctl enable intel-ipu7-camera.service camera-init.service v4l2-relayd@ipu7.service
   root systemctl restart camera-init.service v4l2-relayd@ipu7.service
 
   # Let PipeWire re-probe /dev/video50 for the current user.
   systemctl --user restart wireplumber.service 2>/dev/null || true
+}
+
+configure_sddm_noctalia_login() {
+  local script="$HOME/.config/sddm/sync-noctalia-theme.py"
+  [[ -x "$script" ]] || return 0
+
+  log "Configuring SDDM Noctalia login theme"
+  "$script" --install
 }
 
 configure_browser_flags() {
@@ -296,6 +371,44 @@ configure_browser_flags() {
   done
 }
 
+disable_plymouth_splash() {
+  # Booting docked (Apple Studio Display on Thunderbolt) makes `plymouth quit` hang
+  # for ~20s before systemd kills it. Because sddm.service is ordered
+  # After=plymouth-quit.service, the login screen is delayed by that full timeout,
+  # and plymouth-quit-wait.service then blocks multi-user.target/graphical.target
+  # forever (so TLP power management and the IPU7 camera never start). The broken
+  # display teardown also stalls Noctalia/quickshell ~28s instead of ~5s.
+  #
+  # Fix: drop the boot splash and the plymouth initramfs hook entirely. The LUKS
+  # unlock prompt falls back to the systemd text prompt (sd-encrypt), which works
+  # identically. Idempotent: only edits/rebuilds when plymouth/splash are present.
+  local changed=0
+
+  if grep -q ' splash' /etc/default/limine 2>/dev/null; then
+    log "Removing 'splash' from limine kernel cmdline"
+    root cp -a /etc/default/limine "/etc/default/limine.bak.$(date +%Y%m%d-%H%M%S)"
+    root sed -i 's/ splash//' /etc/default/limine
+    changed=1
+  fi
+
+  if grep -qE '^HOOKS=.* plymouth' /etc/mkinitcpio.conf 2>/dev/null; then
+    log "Removing 'plymouth' hook from mkinitcpio HOOKS"
+    root cp -a /etc/mkinitcpio.conf "/etc/mkinitcpio.conf.bak.$(date +%Y%m%d-%H%M%S)"
+    root sed -i '/^HOOKS=/ s/ plymouth//' /etc/mkinitcpio.conf
+    changed=1
+  fi
+
+  if ((changed)); then
+    log "Rebuilding initramfs and limine config without plymouth"
+    if have limine-mkinitcpio; then
+      root limine-mkinitcpio
+    else
+      root mkinitcpio -P
+    fi
+    have limine-update && root limine-update || true
+  fi
+}
+
 verify() {
   log "Verification"
   v4l2-ctl --list-devices 2>/dev/null | sed -n '/Hardware ISP Camera/,+2p' || true
@@ -310,13 +423,16 @@ verify() {
 }
 
 main() {
-  install_pacman curl linux-cachyos-headers dkms v4l2loopback-dkms gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad jsoncpp libdrm
+  install_pacman curl linux-cachyos-headers dkms v4l2loopback-dkms gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad jsoncpp libdrm rtkit
   configure_thunderbolt_and_brightness
   configure_thermal_and_wifi
+  disable_plymouth_splash
   install_omarchy_ipu7_camera
+  patch_ipu7_psys_bus_register
   configure_ipu7_modules
   patch_noctalia_brightness
   patch_noctalia_apple_brightness
+  configure_sddm_noctalia_login
   configure_browser_flags
   configure_camera_services
   verify

@@ -1,0 +1,121 @@
+{
+  "manifest_version": 3,
+  "version": "1.0.0",
+  "name": "Noctalia Theme",
+  "description": "Generated from Noctalia colors by sync-noctalia-theme.py",
+  "theme": {
+    "colors": {
+      "frame": [
+        12,
+        16,
+        23
+      ],
+      "frame_inactive": [
+        9,
+        13,
+        19
+      ],
+      "toolbar": [
+        17,
+        21,
+        29
+      ],
+      "tab_text": [
+        14,
+        16,
+        21
+      ],
+      "tab_background_text": [
+        155,
+        107,
+        193
+      ],
+      "bookmark_text": [
+        92,
+        138,
+        196
+      ],
+      "ntp_background": [
+        12,
+        16,
+        23
+      ],
+      "ntp_text": [
+        92,
+        138,
+        196
+      ],
+      "button_background": [
+        196,
+        168,
+        46
+      ],
+      "toolbar_button_icon": [
+        196,
+        168,
+        46
+      ],
+      "toolbar_text": [
+        92,
+        138,
+        196
+      ],
+      "toolbar_field": [
+        12,
+        16,
+        23
+      ],
+      "toolbar_field_text": [
+        92,
+        138,
+        196
+      ],
+      "toolbar_field_border": [
+        69,
+        160,
+        214
+      ],
+      "toolbar_field_focus": [
+        17,
+        21,
+        29
+      ],
+      "toolbar_field_text_focus": [
+        92,
+        138,
+        196
+      ],
+      "toolbar_field_border_focus": [
+        196,
+        168,
+        46
+      ]
+    },
+    "tints": {
+      "buttons": [
+        196,
+        168,
+        46
+      ],
+      "frame": [
+        12,
+        16,
+        23
+      ],
+      "frame_inactive": [
+        9,
+        13,
+        19
+      ]
+    },
+    "properties": {
+      "color_scheme": "dark"
+    }
+  },
+  "noctalia": {
+    "primary": "#c4a82e",
+    "secondary": "#d14358",
+    "tertiary": "#00a66c",
+    "surface": "#0c1017"
+  }
+}

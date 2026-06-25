@@ -23,26 +23,34 @@ This skill is adapted from FelipeCabelloE's `niri-config-usage` skill for this m
 
 1. Inspect the current file(s) first. This system uses modular niri config files; do not assume upstream defaults.
 2. Make a timestamped backup before non-trivial edits:
+
    ```sh
    cp -a ~/.config/niri ~/.config/niri.bak.$(date +%Y%m%d-%H%M%S)
    cp -a ~/.config/noctalia ~/.config/noctalia.bak.$(date +%Y%m%d-%H%M%S)
    ```
+
 3. Edit the smallest relevant file.
 4. Validate niri before reload:
+
    ```sh
    niri validate -c ~/.config/niri/config.kdl
    ```
+
 5. If valid, apply without logging out:
+
    ```sh
    niri msg action load-config-file
    ```
+
 6. If Noctalia IPC/shell behavior changed, inspect/restart carefully:
+
    ```sh
    qs list
    qs -c noctalia-shell ipc show
    # Last resort restart:
    qs kill -c noctalia-shell && qs -c noctalia-shell &
    ```
+
 7. Preserve every lasting change in chezmoi before finishing. Home config should be added with `chezmoi add ...`; system-level changes under `/etc`, packages, kernel module options, or systemd services should be represented in the chezmoi helper script and notes instead of unmanaged manual edits.
 
 ## Chezmoi persistence rule
@@ -58,15 +66,20 @@ Before reporting desktop or hardware work as done, check whether the live change
 
 - For home-directory files (`~/.config/niri`, `~/.config/noctalia`, `~/.config/brave-flags.conf`, `~/.config/zed`), run `chezmoi add <path>` or edit the corresponding file under `$(chezmoi source-path)`.
 - For system-level changes (`/etc`, package installs, kernel module options, systemd services, Thunderbolt/camera/Wi‑Fi/thermal fixes), update:
+
   ```text
   $(chezmoi source-path)/private_dot_local/bin/executable_apply-dell-xps-omarchy-hardware-fixes
   ```
+
   and update notes under:
+
   ```text
   $(chezmoi source-path)/notes/
   ```
+
 - Do not add raw `/etc` files to chezmoi unless the user explicitly changes that policy; this user prefers reproducible system fixes as a script.
 - Review with:
+
   ```sh
   cd "$(chezmoi source-path)"
   git status --short
@@ -208,10 +221,13 @@ Then run validation/reload.
 ### Configure an output
 
 1. Discover names/modes:
+
    ```sh
    niri msg outputs
    ```
+
 2. Edit `~/.config/niri/cfg/display.kdl`:
+
    ```kdl
    output "DP-1" {
        mode "2560x1440@359.979"
@@ -219,6 +235,7 @@ Then run validation/reload.
        position x=0 y=0
    }
    ```
+
 3. Validate/reload.
 
 ### Add a floating/window rule
@@ -276,13 +293,43 @@ NIRI_FOCUS_ACTIVE_ALPHA=70 NIRI_FOCUS_INACTIVE_ALPHA=40 ~/.config/niri/scripts/s
 - Check Noctalia IPC: `qs -c noctalia-shell ipc show`
 - Check portals/screencast: `ps -eo comm,args | grep xdg-desktop-portal`
 - Running portals observed: `xdg-desktop-portal`, `xdg-desktop-portal-gnome`, `xdg-desktop-portal-gtk`.
+- Browser/app audio silent while system output works: check per-app PipeWire/PulseAudio mute state. Example for Brave/YouTube:
+
+  ```sh
+  pactl list sink-inputs | grep -B20 -A20 'application.name = "Brave"'
+  # If the Brave sink input shows `Mute: yes`, unmute its live stream:
+  pactl set-sink-input-mute <sink-input-id> 0
+  pactl set-sink-input-volume <sink-input-id> 100%
+  # Also inspect WirePlumber's saved restore state if mute returns:
+  grep 'Output/Audio:application.name:Brave' ~/.local/state/wireplumber/stream-properties
+  ```
+
+  In the 2026-06-19 YouTube case, Brave was creating playback streams but WirePlumber/Pulse stream-restore had them muted (`module-stream-restore.id = "sink-input-by-application-name:Brave"`); live `pactl set-sink-input-mute ... 0` fixed sound.
+- Bluetooth headset sounds quiet/low-quality/mono: check whether it fell into handsfree/call mode instead of A2DP music mode. Example from Px7 S3 on 2026-06-19:
+
+  ```sh
+  pactl get-default-sink
+  pactl get-default-source
+  pactl list sinks | grep -A40 'bluez_output'
+  pactl list cards | grep -A80 'bluez_card'
+  ```
+
+  Bad/call-mode signs: active profile `headset-head-unit`, codec `msbc`/`cvsd`, `s16le 1ch 16000Hz`, channel map `mono`. Good/music-mode signs: profile `a2dp-sink`, stereo 44.1/48 kHz, codec such as `aptx_hd`. If A2DP is missing or WirePlumber says it cannot restore a non-headset profile, reconnect the headset:
+
+  ```sh
+  bluetoothctl disconnect EC:66:D1:CE:8A:34
+  sleep 3
+  bluetoothctl connect EC:66:D1:CE:8A:34
+  ```
+
+  Then verify the default sink is back to `a2dp-sink`. Avoid leaving browser/meeting apps holding the Bluetooth microphone, because microphone use can trigger HSP/HFP and degrade headphone output.
 - For NVIDIA/black-screen issues, verify kernel modeset and consult niri docs before changing `debug { render-drm-device ... }`.
 
 ## Up-to-date references
 
-- niri docs: https://niri-wm.github.io/niri/
-- niri wiki source/docs: https://github.com/YaLTeR/niri/tree/main/docs/wiki
-- Noctalia docs: https://docs.noctalia.dev/
-- Original skill source: https://github.com/FelipeCabelloE/agent-skills/blob/master/niri-config-usage/SKILL.md
+- niri docs: <https://niri-wm.github.io/niri/>
+- niri wiki source/docs: <https://github.com/YaLTeR/niri/tree/main/docs/wiki>
+- Noctalia docs: <https://docs.noctalia.dev/>
+- Original skill source: <https://github.com/FelipeCabelloE/agent-skills/blob/master/niri-config-usage/SKILL.md>
 
 For fresh niri syntax, fetch the current docs before making large changes, because this is a rolling CachyOS system and niri evolves quickly.

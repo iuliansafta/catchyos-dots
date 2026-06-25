@@ -1,4 +1,10 @@
 // ────────────── Startup Applications ──────────────
 // https://github.com/YaLTeR/niri/wiki/Configuration:-Miscellaneous#spawn-sh-at-startup
 
-    spawn-sh-at-startup "qs -c noctalia-shell"
+    // Auto-restart Noctalia if quickshell crashes (e.g. PipeWire-metadata segfault)
+    // so a shell crash never leaves a bare niri backdrop at lock/login.
+    spawn-sh-at-startup "while true; do qs -c noctalia-shell; sleep 1; done"
+
+    // Polkit authentication agent — graphical password prompts for pkexec / privileged actions.
+    // Prefers the binary; falls back to the systemd user unit if the path changes.
+    spawn-sh-at-startup "/usr/lib/hyprpolkitagent/hyprpolkitagent || systemctl --user start hyprpolkitagent.service"
